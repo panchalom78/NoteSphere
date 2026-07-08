@@ -34,4 +34,4 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 # Start backend database init and Next.js production server
-CMD ["sh", "-c", "/app/server/.venv/bin/python -c 'import server' && npm run start"]
+CMD ["sh", "-c", "cd /app/server && .venv/bin/python -c 'import server' && cd /app/client && npm run start"]
