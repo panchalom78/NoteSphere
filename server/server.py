@@ -1,6 +1,8 @@
 import os
 import sqlite3
+import json
 import logging
+from datetime import date
 from typing import List, Optional
 from mcp.server.fastmcp import FastMCP
 
@@ -505,6 +507,82 @@ def delete_task(task_id: int) -> str:
         conn.rollback()
         logger.error(f"Error deleting task: {e}")
         return f"Error: Could not delete task: {e}"
+    finally:
+        conn.close()
+
+
+# ----------------- DIGEST TOOLS -----------------
+
+@mcp.tool()
+def get_daily_digest(as_json: bool = True) -> str:
+    """Get a structured digest of what's relevant today: pending tasks (flagging
+    which are due today), and notes created or updated today. Intended to be fed
+    into an LLM to produce a natural-language "today's summary".
+
+    Args:
+        as_json: If True, returns the digest as a JSON-serialized dictionary.
+    """
+    logger.info("Building daily digest")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        today = date.today()
+        today_iso = today.isoformat()
+        today_label = f"{today.strftime('%A, %B')} {today.day}"
+
+        cursor.execute(
+            "SELECT id, text, due, status FROM tasks WHERE completed = 0 ORDER BY id DESC"
+        )
+        pending_tasks = [
+            {"id": row["id"], "text": row["text"], "due": row["due"], "status": row["status"]}
+            for row in cursor.fetchall()
+        ]
+        tasks_due_today = [t for t in pending_tasks if t["due"] and "today" in t["due"].lower()]
+
+        cursor.execute("SELECT COUNT(*) AS c FROM tasks")
+        total_tasks = cursor.fetchone()["c"]
+
+        cursor.execute(
+            "SELECT id, title, content, created_at, updated_at FROM notes "
+            "WHERE date(created_at) = ? OR date(updated_at) = ? ORDER BY id DESC",
+            (today_iso, today_iso),
+        )
+        notes_today = [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "preview": row["content"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in cursor.fetchall()
+        ]
+
+        cursor.execute("SELECT COUNT(*) AS c FROM notes")
+        total_notes = cursor.fetchone()["c"]
+
+        digest = {
+            "date": today_iso,
+            "date_label": today_label,
+            "tasks_due_today": tasks_due_today,
+            "tasks_pending": pending_tasks,
+            "total_tasks": total_tasks,
+            "notes_today": notes_today,
+            "total_notes": total_notes,
+        }
+
+        if as_json:
+            return json.dumps(digest)
+
+        lines = [f"Daily digest for {today_label}:"]
+        lines.append(
+            f"- {len(tasks_due_today)} task(s) due today, {len(pending_tasks)} pending overall."
+        )
+        lines.append(f"- {len(notes_today)} note(s) created or updated today, {total_notes} total.")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error building daily digest: {e}")
+        return f"Error: Could not build daily digest: {e}"
     finally:
         conn.close()
 

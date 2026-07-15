@@ -3,43 +3,44 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 
-interface Note {
+interface Task {
   id: number;
-  title: string;
-  preview: string;
-  tags: string[];
-  created_at?: string;
-  updated_at?: string;
+  text: string;
+  due: string;
+  completed: boolean;
+  status: "pending" | "completed";
 }
 
-interface NoteFormState {
+interface TaskFormState {
   id: number | null;
-  title: string;
-  content: string;
-  tags: string;
+  text: string;
+  due: string;
 }
 
-const emptyForm: NoteFormState = { id: null, title: "", content: "", tags: "" };
+const emptyForm: TaskFormState = { id: null, text: "", due: "Today" };
 
-export default function NotesPage() {
-  const [notes, setNotes] = useState<Note[]>([]);
+type FilterKey = "all" | "pending" | "completed";
+
+export default function TasksPage() {
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<FilterKey>("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [form, setForm] = useState<NoteFormState>(emptyForm);
+  const [form, setForm] = useState<TaskFormState>(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
-  const fetchNotes = async () => {
+  const fetchTasks = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch("/api/notes");
+      const res = await fetch("/api/tasks");
       const data = await res.json();
       if (Array.isArray(data)) {
-        setNotes(data);
+        setTasks(data);
       }
     } catch (e) {
-      console.error("Error fetching notes:", e);
+      console.error("Error fetching tasks:", e);
     } finally {
       setIsLoading(false);
     }
@@ -47,32 +48,28 @@ export default function NotesPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount
-    fetchNotes();
+    fetchTasks();
   }, []);
 
-  const filteredNotes = useMemo(() => {
+  const filteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return notes;
-    return notes.filter(
-      (note) =>
-        note.title.toLowerCase().includes(q) ||
-        note.preview.toLowerCase().includes(q) ||
-        note.tags.some((tag) => tag.toLowerCase().includes(q))
-    );
-  }, [notes, search]);
+    return tasks.filter((task) => {
+      if (filter === "pending" && task.completed) return false;
+      if (filter === "completed" && !task.completed) return false;
+      if (!q) return true;
+      return task.text.toLowerCase().includes(q) || task.due.toLowerCase().includes(q);
+    });
+  }, [tasks, search, filter]);
+
+  const activeCount = useMemo(() => tasks.filter((t) => !t.completed).length, [tasks]);
 
   const openCreateModal = () => {
     setForm(emptyForm);
     setIsModalOpen(true);
   };
 
-  const openEditModal = (note: Note) => {
-    setForm({
-      id: note.id,
-      title: note.title,
-      content: note.preview,
-      tags: note.tags.join(", "),
-    });
+  const openEditModal = (task: Task) => {
+    setForm({ id: task.id, text: task.text, due: task.due });
     setIsModalOpen(true);
   };
 
@@ -84,56 +81,75 @@ export default function NotesPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.title.trim() || !form.content.trim() || isSaving) return;
+    if (!form.text.trim() || isSaving) return;
 
     setIsSaving(true);
-    const tags = form.tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-
     try {
       if (form.id === null) {
-        await fetch("/api/notes", {
+        await fetch("/api/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: form.title, content: form.content, tags }),
+          body: JSON.stringify({ text: form.text, due: form.due || "Today" }),
         });
       } else {
-        await fetch("/api/notes", {
+        await fetch("/api/tasks", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: form.id, title: form.title, content: form.content, tags }),
+          body: JSON.stringify({ id: form.id, text: form.text, due: form.due }),
         });
       }
-      await fetchNotes();
+      await fetchTasks();
       setIsModalOpen(false);
       setForm(emptyForm);
     } catch (e) {
-      console.error("Failed to save note:", e);
+      console.error("Failed to save task:", e);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const confirmDelete = (noteId: number) => {
-    setPendingDeleteId(noteId);
+  const handleToggle = async (task: Task) => {
+    const nextCompleted = !task.completed;
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === task.id
+          ? { ...t, completed: nextCompleted, status: nextCompleted ? "completed" : "pending" }
+          : t
+      )
+    );
+    try {
+      await fetch("/api/tasks", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: task.id, completed: nextCompleted }),
+      });
+      fetchTasks();
+    } catch (e) {
+      console.error("Failed to toggle task status:", e);
+    }
   };
 
+  const confirmDelete = (taskId: number) => setPendingDeleteId(taskId);
   const cancelDelete = () => setPendingDeleteId(null);
 
   const executeDelete = async () => {
     if (pendingDeleteId === null) return;
-    const noteId = pendingDeleteId;
+    const taskId = pendingDeleteId;
     setPendingDeleteId(null);
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
     try {
-      await fetch(`/api/notes?id=${noteId}`, { method: "DELETE" });
-      fetchNotes();
+      await fetch(`/api/tasks?id=${taskId}`, { method: "DELETE" });
+      fetchTasks();
     } catch (e) {
-      console.error("Failed to delete note:", e);
+      console.error("Failed to delete task:", e);
     }
   };
+
+  const filters: { key: FilterKey; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "pending", label: "Pending" },
+    { key: "completed", label: "Completed" },
+  ];
 
   return (
     <div className="flex-1 bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-indigo-100 antialiased overflow-x-hidden min-h-screen">
@@ -153,21 +169,21 @@ export default function NotesPage() {
             <Link href="/" className="hover:text-slate-900 transition-colors">
               Home
             </Link>
-            <Link href="/tasks" className="hover:text-slate-900 transition-colors">
-              Tasks
+            <Link href="/notes" className="hover:text-slate-900 transition-colors">
+              Notes
             </Link>
-            <span className="text-slate-900">Notes</span>
+            <span className="text-slate-900">Tasks</span>
           </nav>
         </div>
       </header>
 
       <section className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
         {/* Page title + toolbar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Notes</h1>
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Tasks</h1>
             <p className="text-sm text-slate-500 mt-1">
-              {notes.length} {notes.length === 1 ? "note" : "notes"} in your workspace
+              {activeCount} active of {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
             </p>
           </div>
 
@@ -186,7 +202,7 @@ export default function NotesPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search notes or tags..."
+                placeholder="Search tasks..."
                 className="w-full sm:w-64 bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all placeholder-slate-400"
               />
             </div>
@@ -197,105 +213,122 @@ export default function NotesPage() {
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
-              New Note
+              New Task
             </button>
           </div>
         </div>
 
+        {/* Filter tabs */}
+        <div className="flex items-center gap-1.5 mb-6">
+          {filters.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
+                filter === f.key
+                  ? "bg-slate-900 text-white"
+                  : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-100"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
         {/* Content states */}
         {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="bg-white rounded-xl border border-slate-200 p-4 h-40 animate-pulse">
-                <div className="h-3 w-2/3 bg-slate-100 rounded mb-3" />
-                <div className="h-2.5 w-full bg-slate-100 rounded mb-2" />
-                <div className="h-2.5 w-full bg-slate-100 rounded mb-2" />
-                <div className="h-2.5 w-1/2 bg-slate-100 rounded" />
-              </div>
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="bg-white rounded-lg border border-slate-200 p-4 h-14 animate-pulse" />
             ))}
           </div>
-        ) : filteredNotes.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredNotes.map((note) => (
+        ) : filteredTasks.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {filteredTasks.map((task) => (
               <div
-                key={note.id}
-                className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-sm hover:border-slate-300 hover:shadow-md transition-all group/note relative flex flex-col"
+                key={task.id}
+                className={`flex items-center justify-between p-3.5 rounded-lg border group/item hover:bg-slate-50 transition-all ${
+                  task.completed
+                    ? "bg-slate-50/50 border-slate-100 text-slate-400"
+                    : "bg-white border-slate-200/80 text-slate-700"
+                }`}
               >
-                <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover/note:opacity-100 transition-opacity">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={task.completed}
+                    onChange={() => handleToggle(task)}
+                    className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <div>
+                    <p className={`text-sm font-medium leading-tight ${task.completed ? "line-through" : ""}`}>
+                      {task.text}
+                    </p>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Due: {task.due}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                      task.completed ? "bg-slate-100 text-slate-400" : "bg-indigo-50 text-indigo-600"
+                    }`}
+                  >
+                    {task.status}
+                  </span>
                   <button
-                    onClick={() => openEditModal(note)}
-                    className="text-slate-400 hover:text-indigo-600 p-1 cursor-pointer"
-                    title="Edit Note"
+                    onClick={() => openEditModal(task)}
+                    className="text-slate-300 hover:text-indigo-600 p-1 opacity-0 group-hover/item:opacity-100 transition-opacity cursor-pointer"
+                    title="Edit Task"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
                   <button
-                    onClick={() => confirmDelete(note.id)}
-                    className="text-slate-400 hover:text-red-500 p-1 cursor-pointer"
-                    title="Delete Note"
+                    onClick={() => confirmDelete(task.id)}
+                    className="text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover/item:opacity-100 transition-opacity cursor-pointer"
+                    title="Delete Task"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   </button>
                 </div>
-
-                <h3 className="text-sm font-bold text-slate-800 mb-1.5 pr-12 leading-tight">{note.title}</h3>
-                <p className="text-xs text-slate-500 leading-relaxed line-clamp-4 flex-1">{note.preview}</p>
-
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
-                  <div className="flex flex-wrap gap-1">
-                    {note.tags.length > 0 ? (
-                      note.tags.map((tag, i) => (
-                        <span
-                          key={i}
-                          className="text-[9px] font-medium bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded"
-                        >
-                          #{tag}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-[9px] text-slate-300">No tags</span>
-                    )}
-                  </div>
-                  {note.updated_at && (
-                    <span className="text-[9px] text-slate-350 whitespace-nowrap ml-2">{note.updated_at}</span>
-                  )}
-                </div>
               </div>
             ))}
           </div>
-        ) : notes.length > 0 ? (
-          /* No results for search */
+        ) : tasks.length > 0 ? (
+          /* No results for search/filter */
           <div className="flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-xl p-12 text-center bg-white">
             <svg className="w-8 h-8 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <p className="text-sm font-semibold text-slate-600">No notes match &ldquo;{search}&rdquo;</p>
+            <p className="text-sm font-semibold text-slate-600">No tasks match your filters</p>
             <button
-              onClick={() => setSearch("")}
+              onClick={() => {
+                setSearch("");
+                setFilter("all");
+              }}
               className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold mt-2 cursor-pointer"
             >
-              Clear search
+              Clear filters
             </button>
           </div>
         ) : (
           /* Empty state */
           <div className="flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-xl p-16 text-center bg-white">
             <svg className="w-10 h-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v3m2 4l-4 4m0 0l-4-4m4 4V4" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
-            <p className="text-sm font-semibold text-slate-600">No notes yet</p>
+            <p className="text-sm font-semibold text-slate-600">No tasks yet</p>
             <p className="text-xs text-slate-400 mt-1 max-w-[220px]">
-              Create your first note to start organizing your ideas.
+              Create your first task to start tracking your to-dos.
             </p>
             <button
               onClick={openCreateModal}
               className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm cursor-pointer mt-4"
             >
-              Create a note
+              Create a task
             </button>
           </div>
         )}
@@ -308,18 +341,12 @@ export default function NotesPage() {
           onClick={closeModal}
         >
           <div
-            className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg p-5"
+            className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-slate-800">
-                {form.id === null ? "New Note" : "Edit Note"}
-              </h2>
-              <button
-                onClick={closeModal}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
-                title="Close"
-              >
+              <h2 className="text-sm font-bold text-slate-800">{form.id === null ? "New Task" : "Edit Task"}</h2>
+              <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1" title="Close">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -328,35 +355,24 @@ export default function NotesPage() {
 
             <form onSubmit={handleSave} className="flex flex-col gap-3">
               <div>
-                <label className="text-[11px] font-semibold text-slate-500 block mb-1">Title</label>
+                <label className="text-[11px] font-semibold text-slate-500 block mb-1">Task</label>
                 <input
                   type="text"
-                  value={form.title}
-                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                  placeholder="Note title"
+                  value={form.text}
+                  onChange={(e) => setForm((f) => ({ ...f, text: e.target.value }))}
+                  placeholder="What needs to be done?"
                   autoFocus
                   className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all placeholder-slate-400"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-slate-500 block mb-1">Content</label>
-                <textarea
-                  value={form.content}
-                  onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
-                  placeholder="Write your note..."
-                  rows={6}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all placeholder-slate-400 resize-none"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-semibold text-slate-500 block mb-1">Tags</label>
+                <label className="text-[11px] font-semibold text-slate-500 block mb-1">Due</label>
                 <input
                   type="text"
-                  value={form.tags}
-                  onChange={(e) => setForm((f) => ({ ...f, tags: e.target.value }))}
-                  placeholder="comma, separated, tags"
+                  value={form.due}
+                  onChange={(e) => setForm((f) => ({ ...f, due: e.target.value }))}
+                  placeholder="e.g. Today, Friday, 2026-07-20"
                   className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all placeholder-slate-400"
                 />
               </div>
@@ -371,10 +387,10 @@ export default function NotesPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!form.title.trim() || !form.content.trim() || isSaving}
+                  disabled={!form.text.trim() || isSaving}
                   className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm cursor-pointer"
                 >
-                  {isSaving ? "Saving..." : form.id === null ? "Create Note" : "Save Changes"}
+                  {isSaving ? "Saving..." : form.id === null ? "Create Task" : "Save Changes"}
                 </button>
               </div>
             </form>
@@ -392,7 +408,7 @@ export default function NotesPage() {
             className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-sm p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-sm font-bold text-slate-800 mb-1">Delete this note?</h2>
+            <h2 className="text-sm font-bold text-slate-800 mb-1">Delete this task?</h2>
             <p className="text-xs text-slate-500 mb-4">This action cannot be undone.</p>
             <div className="flex items-center justify-end gap-2">
               <button

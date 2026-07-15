@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 
 interface Task {
   id: number;
@@ -23,6 +24,13 @@ interface ChatMessage {
   trace?: string[];
 }
 
+interface SummaryStats {
+  tasksDueToday: number;
+  tasksPending: number;
+  notesToday: number;
+  totalNotes: number;
+}
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -32,6 +40,12 @@ export default function Home() {
   const [isLoadingNotes, setIsLoadingNotes] = useState(true);
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
   const [isSending, setIsSending] = useState(false);
+
+  const [summary, setSummary] = useState("");
+  const [summaryStats, setSummaryStats] = useState<SummaryStats | null>(null);
+  const [summaryDate, setSummaryDate] = useState("");
+  const [isLoadingSummary, setIsLoadingSummary] = useState(true);
+  const [summaryError, setSummaryError] = useState("");
 
   const fetchNotes = async () => {
     try {
@@ -63,16 +77,38 @@ export default function Home() {
     }
   };
 
+  const fetchSummary = async () => {
+    try {
+      setIsLoadingSummary(true);
+      setSummaryError("");
+      const res = await fetch("/api/summary");
+      const data = await res.json();
+      if (data.error) {
+        setSummaryError(data.error);
+      } else {
+        setSummary(data.summary || "");
+        setSummaryStats(data.stats || null);
+        setSummaryDate(data.date || "");
+      }
+    } catch (e) {
+      console.error("Error fetching summary:", e);
+      setSummaryError("Couldn't reach the summary service.");
+    } finally {
+      setIsLoadingSummary(false);
+    }
+  };
+
   useEffect(() => {
     fetchNotes();
     fetchTasks();
+    fetchSummary();
   }, []);
 
   const quickActions = [
     { label: "Add task to read paper", placeholder: "add task read paper on neural networks due friday" },
     { label: "Show today's agenda", placeholder: "what are my active tasks for today?" },
     { label: "Create a note for project ideas", placeholder: "create a note Project Ideas: build a local markdown calendar" },
-    { label: "Search my notes", placeholder: "search notes for gemini" }
+    { label: "Search my notes", placeholder: "search notes for project ideas" }
   ];
 
   const handleQuickAction = (placeholder: string) => {
@@ -172,13 +208,13 @@ export default function Home() {
               <span className="text-white text-xs font-black tracking-tighter">N</span>
             </div>
             <span className="text-sm font-bold tracking-tight text-slate-800">
-              NoteSphere <span className="text-[10px] text-slate-400 font-medium ml-1">v1.0</span>
+              NoteSphere
             </span>
           </div>
 
           <nav className="flex items-center gap-6 text-xs font-semibold text-slate-500">
-            <a href="#panels-section" className="hover:text-slate-900 transition-colors">Workspace</a>
-            <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer" className="hover:text-slate-900 transition-colors">MCP Spec</a>
+            <Link href="/tasks" className="hover:text-slate-900 transition-colors">Tasks</Link>
+            <Link href="/notes" className="hover:text-slate-900 transition-colors">Notes</Link>
           </nav>
         </div>
       </header>
@@ -192,7 +228,7 @@ export default function Home() {
             Conversational Productivity
           </h1>
           <p className="text-sm sm:text-base text-slate-500 mb-8 max-w-xl mx-auto">
-            Your tasks and notes, managed by conversation. Ask Gemini to schedule tasks, filter logs, or organize ideas via MCP.
+            Your tasks and notes, managed by conversation. Just chat with your assistant to schedule tasks, search your notes, or jot down new ideas.
           </p>
 
           {/* 3. Main Chat Prompt Core */}
@@ -236,17 +272,68 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Interactive Chat Console Logs (Optional visual addon to make logic evident) */}
+      {/* Today's Summary */}
+      <section className="bg-slate-50 py-8 border-b border-slate-200/50">
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="bg-gradient-to-br from-indigo-50 to-white border border-indigo-100 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+                <h2 className="text-sm font-bold text-slate-800">Today&rsquo;s Summary</h2>
+                {summaryDate && (
+                  <span className="text-[10px] text-slate-400 font-medium">{summaryDate}</span>
+                )}
+              </div>
+              <button
+                onClick={fetchSummary}
+                disabled={isLoadingSummary}
+                className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                {isLoadingSummary ? "Generating..." : "Refresh"}
+              </button>
+            </div>
+
+            {isLoadingSummary ? (
+              <div className="flex flex-col gap-2 animate-pulse">
+                <div className="h-3 w-full bg-indigo-100/70 rounded" />
+                <div className="h-3 w-4/5 bg-indigo-100/70 rounded" />
+              </div>
+            ) : summaryError ? (
+              <p className="text-sm text-slate-400">{summaryError}</p>
+            ) : (
+              <p className="text-sm text-slate-600 leading-relaxed">{summary}</p>
+            )}
+
+            {summaryStats && !isLoadingSummary && !summaryError && (
+              <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-indigo-100">
+                <span className="text-[9px] font-semibold bg-white text-slate-500 border border-indigo-100 px-2 py-1 rounded-full">
+                  {summaryStats.tasksDueToday} due today
+                </span>
+                <span className="text-[9px] font-semibold bg-white text-slate-500 border border-indigo-100 px-2 py-1 rounded-full">
+                  {summaryStats.tasksPending} pending
+                </span>
+                <span className="text-[9px] font-semibold bg-white text-slate-500 border border-indigo-100 px-2 py-1 rounded-full">
+                  {summaryStats.notesToday} notes today
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Chat history */}
       {chatHistory.length > 0 && (
         <section className="bg-slate-50 py-6 border-b border-slate-200/50">
           <div className="max-w-2xl mx-auto px-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Assistant Response Stream</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Conversation</span>
               <button
                 onClick={() => setChatHistory([])}
                 className="text-[10px] text-slate-400 hover:text-slate-600 font-medium"
               >
-                Clear Console
+                Clear
               </button>
             </div>
             {chatHistory.map((item, idx) => (
@@ -260,21 +347,10 @@ export default function Home() {
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <span className={`w-1.5 h-1.5 rounded-full ${item.sender === "user" ? "bg-slate-400" : "bg-indigo-500"}`} />
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    {item.sender === "user" ? "User Query" : "AI Agent"}
+                    {item.sender === "user" ? "You" : "Assistant"}
                   </span>
                 </div>
                 <p className="text-xs text-slate-700 leading-relaxed font-sans">{item.text}</p>
-
-                {item.trace && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-1">
-                    {item.trace.map((tr, tIdx) => (
-                      <div key={tIdx} className="flex items-center gap-1.5 text-[9px] font-mono text-slate-400">
-                        <span className="text-indigo-400 select-none">❯</span>
-                        <span>{tr}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -294,9 +370,17 @@ export default function Home() {
                 </svg>
                 <h2 className="text-sm font-bold text-slate-800">Tasks</h2>
               </div>
-              <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                {tasks.filter(t => !t.completed).length} active
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                  {tasks.filter(t => !t.completed).length} active
+                </span>
+                <Link
+                  href="/tasks"
+                  className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
+                >
+                  Manage all &rarr;
+                </Link>
+              </div>
             </div>
 
             {/* Scrollable list */}
@@ -370,9 +454,17 @@ export default function Home() {
                 </svg>
                 <h2 className="text-sm font-bold text-slate-800">Recent Notes</h2>
               </div>
-              <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                {notesList.length} items
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                  {notesList.length} items
+                </span>
+                <Link
+                  href="/notes"
+                  className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
+                >
+                  Manage all &rarr;
+                </Link>
+              </div>
             </div>
 
             {/* Scrollable grid/list */}
@@ -417,6 +509,12 @@ export default function Home() {
                   Instruct the assistant: <br />
                   <span className="font-semibold text-slate-500">"create a note Meeting Agenda: discuss designs"</span>
                 </p>
+                <Link
+                  href="/notes"
+                  className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 mt-2 transition-colors"
+                >
+                  or create one manually &rarr;
+                </Link>
               </div>
             )}
           </div>
@@ -433,7 +531,7 @@ export default function Home() {
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
             <span className="text-[10px] font-semibold text-slate-500">
-              Connected to MCP server
+              Assistant connected
             </span>
           </div>
 

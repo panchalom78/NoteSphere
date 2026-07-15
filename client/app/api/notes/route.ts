@@ -34,6 +34,26 @@ export async function POST(request: Request) {
     }
 }
 
+export async function PUT(request: Request) {
+    try {
+        const { id, title, content, tags } = await request.json();
+        if (!id) {
+            return NextResponse.json({ error: "Missing required field: id" }, { status: 400 });
+        }
+        const response = await runMcpTool("update_note", {
+            note_id: Number(id),
+            title: title ?? undefined,
+            content: content ?? undefined,
+            tags: tags ?? undefined
+        });
+        const message = response.content?.[0]?.text || "Note updated successfully";
+        return NextResponse.json({ message });
+    } catch (error: any) {
+        console.error("Error in PUT /api/notes:", error);
+        return NextResponse.json({ error: error.message || "Failed to update note" }, { status: 500 });
+    }
+}
+
 export async function DELETE(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
